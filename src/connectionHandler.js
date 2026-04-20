@@ -73,8 +73,25 @@ const handle = (conn) => {
         conn.destroy();
     });
 
-    conn.on("data", function mainListener(data) {
-        data = data.trim().split(",");
+    // mainListener accumulates incoming bytes until either a '\n'
+    // terminator is seen OR a short idle gap suggests a legacy client
+    // finished sending. TCP does not preserve application-level
+    // boundaries, so handling the first chunk as if it were a full
+    // message risked passing a truncated JOB request (e.g. data[3]
+    // cut mid-mining_key) to miningHandler. Any bytes that followed
+    // the first '\n' are fed into conn._recvBuf so miningHandler's
+    // receiveData picks them up as the next message without loss.
+    //
+    // Dual-mode framing matches the same logic in mining.js's
+    // receiveData: prefer '\n', fall back to "no data for 10 ms" for
+    // legacy clients that don't terminate their messages.
+    const MAIN_IDLE_FLUSH_MS = 10;
+    let mainFlushTimer = null;
+
+    // processParsedData contains the original mainListener body (the
+    // ban / JOB / MOTD dispatch) unchanged. It is called exactly once
+    // per client, with a cleanly-framed message.
+    const processParsedData = (data) => {
 
         if (!conn.remoteAddress || data.length > 6) {
             conn.write("BAD,Incorrect data\n");
@@ -125,7 +142,43 @@ const handle = (conn) => {
         } else if (data[0] === "MOTD") {
             conn.write(motd);
         }
-    });
+    };
+
+    const dispatchMain = () => {
+        if (mainFlushTimer) {
+            clearTimeout(mainFlushTimer);
+            mainFlushTimer = null;
+        }
+        const idx = (conn._mainBuf || "").indexOf("\n");
+        if (idx >= 0) {
+            const line = conn._mainBuf.slice(0, idx);
+            const leftover = conn._mainBuf.slice(idx + 1);
+            conn._mainBuf = "";
+            if (leftover.length > 0) {
+                conn._recvBuf = (conn._recvBuf || "") + leftover;
+            }
+            processParsedData(line.trim().split(","));
+            return;
+        }
+        // No '\n' yet but no more data in flight: legacy client frame.
+        if ((conn._mainBuf || "").length > 0) {
+            const line = conn._mainBuf;
+            conn._mainBuf = "";
+            processParsedData(line.trim().split(","));
+        }
+    };
+
+    const mainListener = (chunk) => {
+        conn._mainBuf = (conn._mainBuf || "") + chunk;
+        if (conn._mainBuf.indexOf("\n") >= 0) {
+            dispatchMain();
+            return;
+        }
+        if (mainFlushTimer) clearTimeout(mainFlushTimer);
+        mainFlushTimer = setTimeout(dispatchMain, MAIN_IDLE_FLUSH_MS);
+    };
+
+    conn.on("data", mainListener);
 };
 
 module.exports = handle;
