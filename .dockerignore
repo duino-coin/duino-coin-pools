@@ -1,0 +1,8 @@
+node_modules/
+.git/
+config/
+sync/
+dashboard/rewards*.json
+dashboard/workers_*.json
+dashboard/history*.json
+npm-debug.log*

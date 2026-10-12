@@ -9,6 +9,10 @@
     "dashboard_port": 6030,
     "historyMaxPoints": 480,
     "historyMaxAgeHours": 24,
+    "syncTime": 60,
+    "timeout": 15,
+    "server_sync_url": "https://server.duinocoin.com",
+    "base_sync_folder": "./sync",
 
     "serverIP": "server.duinocoin.com",
     "serverPort": 2810,

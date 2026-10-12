@@ -1,0 +1,13 @@
+services:
+  duino-pool:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "6000:6000"
+      - "6030:6030"
+    volumes:
+      - ./config:/app/config
+      - sync-data:/app/sync
+
+volumes:
+  sync-data:
